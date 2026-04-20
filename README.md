@@ -1,19 +1,21 @@
 # agent-chatroom
 
-A portable **Agent Skill** that lets two or more AI agent sessions (Claude Code, OpenAI Codex CLI, or anything else that follows the [Agent Skills](https://developers.openai.com/codex/skills) standard) share a chat room backed by an append-only JSONL message stream.
+A portable **Agent Skill** that lets two or more AI agent sessions share a chat room backed by an append-only JSONL message stream.
 
-- **No server.** No daemon. No scheduler.
-- **No harness coupling.** Pure filesystem + two Python scripts.
-- **Any agent, any CLI.** Claude Code and Codex both support the same `SKILL.md` format.
+Works with anything that follows the Agent Skills standard — **Claude Code**, **OpenAI Codex CLI**, and compatible tools.
+
+- No server. No daemon. No scheduler.
+- No harness coupling. Pure filesystem + two Python scripts.
+- Rooms are fully self-contained directories. Nothing global, nothing to collide.
 
 ## How it works
 
-1. Agent A runs `/chatroom create <name>` → a directory is created at `~/.agent-chatrooms/<name>-<id>/` containing `messages.jsonl`, `ROOM.md`, and the two coord scripts.
-2. Agent A hands you back a path. You paste it to Agent B.
-3. Agent B runs `/chatroom join <path>` → announces itself in `messages.jsonl`.
-4. Either agent runs `/chatroom send <text>` and `/chatroom read` to talk.
+1. Agent A runs `/chatroom create <name>` — a directory is created at `~/.agent-chatrooms/<name>-<id>/` containing `messages.jsonl`, `ROOM.md`, and the two coord scripts.
+2. Agent A prints a join path. You copy it.
+3. You paste it into another agent: `/chatroom join <path>`. Agent B announces itself via a new message.
+4. Either side runs `/chatroom send <text>` and `/chatroom read` to talk.
 
-Cursor state is per-agent (under `state/`), so each agent sees only unread messages.
+Each agent has its own cursor under `<room>/state/<agent_id>.cursor.json`, so each side sees only its unread messages.
 
 ## Install
 
@@ -23,13 +25,13 @@ Cursor state is per-agent (under `state/`), so each agent sees only unread messa
 git clone https://github.com/weijiafu14/agent-chatroom ~/.claude/skills/chatroom
 ```
 
-Or for a single project:
+Or at project level:
 
 ```bash
 git clone https://github.com/weijiafu14/agent-chatroom <project>/.claude/skills/chatroom
 ```
 
-Restart Claude Code. Then invoke with `/chatroom create my-room`.
+Restart Claude Code.
 
 ### Codex CLI
 
@@ -37,21 +39,21 @@ Restart Claude Code. Then invoke with `/chatroom create my-room`.
 git clone https://github.com/weijiafu14/agent-chatroom ~/.codex/skills/chatroom
 ```
 
-Or via the built-in installer inside Codex:
+Or through Codex's built-in installer:
 
 ```
 $skill-installer git https://github.com/weijiafu14/agent-chatroom chatroom
 ```
 
-Restart Codex. Then invoke with `/chatroom create my-room` or just ask Codex: "create a chatroom called my-room".
+Restart Codex.
 
-### Any other CLI that reads `~/.<tool>/skills/*/SKILL.md`
+### Any other skill-compatible CLI
 
-Same pattern — clone into its skills directory.
+Clone into its skills directory using the same layout.
 
 ## Usage
 
-### Create a room (Agent A)
+### Agent A — create
 
 ```
 /chatroom create design-review
@@ -61,20 +63,22 @@ Output:
 ```
 Chat room created.
   Path:     /Users/alice/.agent-chatrooms/design-review-a3f8b2c1
-  Your ID:  agent-ea58cfad
+  Your ID:  claude
 
 Invite another agent by telling them:
   /chatroom join /Users/alice/.agent-chatrooms/design-review-a3f8b2c1
 ```
 
-### Join a room (Agent B)
+### Agent B — join
 
-Paste the join command into a different agent session:
+Paste the join command into a different agent session (can be a different CLI):
+
 ```
 /chatroom join /Users/alice/.agent-chatrooms/design-review-a3f8b2c1
 ```
 
-Optional custom name:
+Optional explicit name:
+
 ```
 /chatroom join /Users/alice/.agent-chatrooms/design-review-a3f8b2c1 as reviewer
 ```
@@ -88,6 +92,13 @@ Optional custom name:
 /chatroom list
 ```
 
+## Identity model
+
+- `agent_id` defaults to the CLI name (`claude`, `codex`), suffix-numbered on collision (`claude-2`, …) — stable, semantic, not a random UUID.
+- User can always override with `as <name>`.
+- Room state lives inside the room directory (cursors, participants list, attachments, locks). Nothing global beyond the list of rooms themselves.
+- Agents remember `room_path` + `agent_id` from the conversation context. Those two strings (<100 bytes total) are all that's needed to keep working. If the context gets compacted and loses them, `/chatroom list` + re-join rebuilds state — per-agent cursors persist inside the room so unread tracking is not lost.
+
 ## Repo layout
 
 ```
@@ -99,15 +110,15 @@ agent-chatroom/
   README.md               # This file
 ```
 
-## Protocol
+## Message shape
 
 Every message is one JSON line in `messages.jsonl`:
 
 ```json
 {
-  "id": "msg-20260420201757-e499534a",
-  "ts": "2026-04-20T20:17:57+08:00",
-  "from": "agent-ea58cfad",
+  "id": "msg-20260420204303-a6855ef2",
+  "ts": "2026-04-20T20:43:03+08:00",
+  "from": "claude",
   "role": "agent",
   "to": ["user"],
   "topic": "design-review-a3f8b2c1",
@@ -118,13 +129,13 @@ Every message is one JSON line in `messages.jsonl`:
 }
 ```
 
-Message types: `message`, `question`, `update`, `finding`, `decision`, `conclusion`, `ack`, `challenge`, `done`, `system`.
+Types: `message`, `question`, `update`, `finding`, `decision`, `conclusion`, `ack`, `challenge`, `done`, `system`.
 
-See `SKILL.md` for the full operational rules.
+Full operational rules are in [`SKILL.md`](./SKILL.md).
 
 ## Cross-machine
 
-`~/.agent-chatrooms/` is local. To share a room across machines put it in a synced folder (Dropbox, iCloud, NFS) or in a git repo both agents clone, and pass the absolute path.
+`~/.agent-chatrooms/` is local. To share a room across machines put it in a synced folder (Dropbox, iCloud, NFS) or a git repo both sides clone, and pass the absolute path.
 
 ## License
 
