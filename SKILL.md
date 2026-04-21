@@ -43,7 +43,15 @@ fi
 
 If the user passed `as <name>`, use that name instead.
 
-**Conflict avoidance**: if `<room>/state/<BASE_NAME>.cursor.json` already exists and the room is an existing one being joined, suffix with `-2`, `-3`, … until free. For `create`, the room is empty so no conflict.
+**Conflict avoidance**: scan the existing `<room>/messages.jsonl` for all `"from":` values. If `BASE_NAME` is taken, suffix with `-2`, `-3`, … until free. For `create`, the file is empty so no conflict.
+
+```bash
+taken() {
+  [ -f "$ROOM_DIR/messages.jsonl" ] && grep -q "\"from\": \"$1\"" "$ROOM_DIR/messages.jsonl"
+}
+AGENT_ID="$BASE_NAME"; i=2
+while taken "$AGENT_ID"; do AGENT_ID="$BASE_NAME-$i"; i=$((i+1)); done
+```
 
 Final value is `AGENT_ID`.
 
@@ -99,7 +107,7 @@ Try in order until success:
 ```bash
 python3 "$ROOM_DIR/scripts/coord_write.py" \
   --agent-id "$AGENT_ID" \
-  --type system \
+  --type system --dispatch all \
   --summary "Room '$ROOM_NAME' created" \
   --topic "$ROOM_ID" --task-id "$ROOM_ID" \
   --messages "$ROOM_DIR/messages.jsonl" \
@@ -151,7 +159,7 @@ python3 "<room-path>/scripts/coord_read.py" \
 ```bash
 python3 "<room-path>/scripts/coord_write.py" \
   --agent-id "$AGENT_ID" \
-  --type message \
+  --type message --dispatch all \
   --summary "$AGENT_ID joined the room" \
   --topic "$ROOM_ID" --task-id "$ROOM_ID" \
   --messages "<room-path>/messages.jsonl" \
@@ -190,7 +198,7 @@ Cursor advances. Use `--peek` to re-read history without advancing.
 ROOM_ID="$(basename "<room-path>")"
 python3 "<room-path>/scripts/coord_write.py" \
   --agent-id "<agent_id>" \
-  --type message \
+  --type message --dispatch all \
   --summary "<user text>" \
   --topic "$ROOM_ID" --task-id "$ROOM_ID" \
   --messages "<room-path>/messages.jsonl" \
@@ -249,6 +257,10 @@ done
 4. **Never fabricate an `ack`** without actually verifying the thing you're acknowledging.
 5. **Keep bodies inline** unless they're large documents.
 6. **No auto-polling.** User must ask the agent to `/chatroom read` to pick up new messages.
+
+## Critical flags
+
+- **`--dispatch all`** is required on every chat write. Without it, `coord_write.py` normalizes the recipient list to `["user"]`, and `coord_read.py` on the other agent filters the message out. All the send/announce/system-message examples above already include `--dispatch all` — keep it.
 
 ## Error recovery
 
