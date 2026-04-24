@@ -1,23 +1,124 @@
 # agent-chatroom
 
-A portable **Agent Skill** that lets two or more AI agent sessions share a chat room backed by an append-only JSONL message stream.
+A portable **Agent Skill** that lets two or more AI agent sessions talk through a shared append-only JSONL chat room.
 
-Works with anything that follows the Agent Skills standard — **Claude Code**, **OpenAI Codex CLI**, and compatible tools.
+It works with skill-compatible CLIs such as **Claude Code** and **OpenAI Codex CLI**.
 
-- No server. No daemon. No scheduler.
-- No harness coupling. Pure filesystem + two Python scripts.
-- Rooms are fully self-contained directories. Nothing global, nothing to collide.
+**What it is:** a tiny coordination primitive for multi-agent work.
 
-## How it works
+**What it is not:** another heavy orchestration stack, daemon, hosted service, or workflow engine.
 
-1. Agent A runs `/chatroom create <name>` — a directory is created at `~/.agent-chatrooms/<name>-<id>/` containing `messages.jsonl`, `ROOM.md`, and the two coord scripts.
-2. Agent A prints a join path. You copy it.
-3. You paste it into another agent: `/chatroom join <path>`. Agent B announces itself via a new message.
-4. Either side runs `/chatroom send <text>` and `/chatroom read` to talk.
+## Why this is useful
 
-Each agent has its own cursor under `<room>/state/<agent_id>.cursor.json`, so each side sees only its unread messages.
+Most multi-agent demos jump straight to planners, task graphs, and orchestration frameworks.
+This repo does something simpler and more reusable:
 
-## Install
+- **Zero infra** — no server, no daemon, no scheduler
+- **Cross-agent** — one room can be shared by Claude Code, Codex, and other compatible CLIs
+- **Append-only** — all coordination goes into one `messages.jsonl`
+- **Self-contained rooms** — each room is just a directory you can inspect, sync, archive, or delete
+- **Cursor-based reading** — each agent tracks its own unread state
+- **Protocol-first** — message types, reply links, decisions, locks, and delivery semantics are explicit
+
+If you want agents to coordinate *without* building a whole control plane first, this is the useful building block.
+
+## 30-second mental model
+
+Agent A:
+
+```text
+/chatroom create design-review
+```
+
+Agent B:
+
+```text
+/chatroom join /Users/alice/.agent-chatrooms/design-review-a3f8b2c1
+```
+
+Then both sides can do:
+
+```text
+/chatroom send I think the API naming is inconsistent
+/chatroom read
+/chatroom status
+```
+
+Under the hood, they are just exchanging structured messages through:
+
+```text
+<room>/messages.jsonl
+```
+
+with per-agent cursors stored in:
+
+```text
+<room>/state/<agent_id>.cursor.json
+```
+
+## Demo flow
+
+### 1. Create a room
+
+```text
+/chatroom create design-review
+```
+
+Example output:
+
+```text
+Chat room created.
+  Path:     /Users/alice/.agent-chatrooms/design-review-a3f8b2c1
+  Your ID:  claude
+
+Invite another agent by telling them:
+  /chatroom join /Users/alice/.agent-chatrooms/design-review-a3f8b2c1
+```
+
+### 2. Join from another agent
+
+```text
+/chatroom join /Users/alice/.agent-chatrooms/design-review-a3f8b2c1
+```
+
+Optional explicit identity:
+
+```text
+/chatroom join /Users/alice/.agent-chatrooms/design-review-a3f8b2c1 as reviewer
+```
+
+### 3. Exchange messages
+
+```text
+/chatroom send 我觉得这个 API 的字段命名不一致
+/chatroom read
+```
+
+## What a room contains
+
+Each room is a normal directory:
+
+```text
+~/.agent-chatrooms/<room-id>/
+  ROOM.md
+  messages.jsonl
+  attachments/
+  locks/
+  state/
+  scripts/
+    coord_read.py
+    coord_write.py
+```
+
+That means rooms are:
+
+- easy to inspect
+- easy to back up
+- easy to sync across machines
+- easy to debug
+- easy to delete
+
+## Installation
 
 ### Claude Code
 
@@ -39,80 +140,34 @@ Restart Claude Code.
 git clone https://github.com/weijiafu14/agent-chatroom ~/.codex/skills/chatroom
 ```
 
-Or through Codex's built-in installer:
+Or with Codex's installer:
 
-```
+```text
 $skill-installer git https://github.com/weijiafu14/agent-chatroom chatroom
 ```
 
 Restart Codex.
 
-### Any other skill-compatible CLI
+### Other skill-compatible CLIs
 
-Clone into its skills directory using the same layout.
-
-## Usage
-
-### Agent A — create
-
-```
-/chatroom create design-review
-```
-
-Output:
-```
-Chat room created.
-  Path:     /Users/alice/.agent-chatrooms/design-review-a3f8b2c1
-  Your ID:  claude
-
-Invite another agent by telling them:
-  /chatroom join /Users/alice/.agent-chatrooms/design-review-a3f8b2c1
-```
-
-### Agent B — join
-
-Paste the join command into a different agent session (can be a different CLI):
-
-```
-/chatroom join /Users/alice/.agent-chatrooms/design-review-a3f8b2c1
-```
-
-Optional explicit name:
-
-```
-/chatroom join /Users/alice/.agent-chatrooms/design-review-a3f8b2c1 as reviewer
-```
-
-### Chat
-
-```
-/chatroom send 我觉得这个 API 的字段命名不一致
-/chatroom read
-/chatroom status
-/chatroom list
-```
+Clone it into the tool's skills directory using the same layout.
 
 ## Identity model
 
-- `agent_id` defaults to the CLI name (`claude`, `codex`), suffix-numbered on collision (`claude-2`, …) — stable, semantic, not a random UUID.
-- User can always override with `as <name>`.
-- Room state lives inside the room directory (cursors, participants list, attachments, locks). Nothing global beyond the list of rooms themselves.
-- Agents remember `room_path` + `agent_id` from the conversation context. Those two strings (<100 bytes total) are all that's needed to keep working. If the context gets compacted and loses them, `/chatroom list` + re-join rebuilds state — per-agent cursors persist inside the room so unread tracking is not lost.
+- Default `agent_id` is the CLI identity, e.g. `claude` or `codex`
+- Name collisions auto-suffix to `claude-2`, `codex-2`, etc.
+- User can override with `as <name>`
+- Agents only need two pieces of remembered state:
+  - `room_path`
+  - `agent_id`
+- If context is compacted and those are lost, `/chatroom list` + re-join restores the session
+- Unread tracking survives because cursors are persisted inside the room directory
 
-## Repo layout
+## Message model
 
-```
-agent-chatroom/
-  SKILL.md                # The skill (name + description frontmatter + instructions)
-  scripts/
-    coord_read.py         # Cursor-based JSONL reader
-    coord_write.py        # Atomic JSONL writer with schema validation
-  README.md               # This file
-```
+Each line in `messages.jsonl` is one structured message.
 
-## Message shape
-
-Every message is one JSON line in `messages.jsonl`:
+Example:
 
 ```json
 {
@@ -120,23 +175,80 @@ Every message is one JSON line in `messages.jsonl`:
   "ts": "2026-04-20T20:43:03+08:00",
   "from": "claude",
   "role": "agent",
-  "to": ["user"],
+  "to": ["*"],
   "topic": "design-review-a3f8b2c1",
   "task_id": "design-review-a3f8b2c1",
   "type": "message",
-  "summary": "…",
-  "body": "…optional longer body…"
+  "summary": "I think the API naming is inconsistent",
+  "dispatch": "all"
 }
 ```
 
-Types: `message`, `question`, `update`, `finding`, `decision`, `conclusion`, `ack`, `challenge`, `done`, `system`.
+Supported message types include:
 
-Full operational rules are in [`SKILL.md`](./SKILL.md).
+- `message`
+- `question`
+- `update`
+- `finding`
+- `decision`
+- `conclusion`
+- `ack`
+- `challenge`
+- `done`
+- `system`
 
-## Cross-machine
+Full protocol and operational rules live in [`SKILL.md`](./SKILL.md).
 
-`~/.agent-chatrooms/` is local. To share a room across machines put it in a synced folder (Dropbox, iCloud, NFS) or a git repo both sides clone, and pass the absolute path.
+## Why this design is interesting
+
+This repo is useful beyond chat itself.
+It can act as a minimal protocol layer for:
+
+- multi-agent code review
+- parallel research sessions
+- planner ↔ executor coordination
+- human-supervised agent debates
+- cross-CLI experiments (Claude Code ↔ Codex)
+- filesystem-native coordination in synced folders or repos
+
+In other words, this is a **portable coordination primitive**, not just a toy chat log.
+
+## Cross-machine usage
+
+`~/.agent-chatrooms/` is local by default.
+
+To share a room across machines, create the room in a synced path such as:
+
+- Dropbox
+- iCloud Drive
+- NFS / shared volume
+- a git repo cloned on both sides
+
+Then pass that absolute path to the other agent.
+
+## Repo layout
+
+```text
+agent-chatroom/
+  SKILL.md                # Skill trigger + usage instructions
+  scripts/
+    coord_read.py         # Cursor-based JSONL reader
+    coord_write.py        # Atomic writer + validation + locks
+  README.md
+  LICENSE
+```
+
+## Current status
+
+Current repo shape is intentionally small:
+
+- 1 skill file
+- 2 Python scripts
+- no backend service
+- no extra dependencies beyond Python 3
+
+That small surface area is part of the point.
 
 ## License
 
-MIT
+MIT. See [LICENSE](./LICENSE).
