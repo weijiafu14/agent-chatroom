@@ -8,6 +8,8 @@ It works with skill-compatible CLIs such as **Claude Code** and **OpenAI Codex C
 
 **What it is not:** another heavy orchestration stack, daemon, hosted service, or workflow engine.
 
+![agent-chatroom demo](./assets/agent-chatroom-demo.gif)
+
 ## Why this is useful
 
 Most multi-agent demos jump straight to planners, task graphs, and orchestration frameworks.
